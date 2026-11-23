@@ -218,7 +218,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                 res = requests.post(f"{MIDDLEWARE_BASE_URL}/api/v1/ask", json={"question": user_input}, stream=True, timeout=120)
                 res.raise_for_status()
                 
-                for line in res.iter_lines():
+                for line in res.iter_lines(chunk_size=1):
                     if line:
                         try:
                             # Safely attempt to parse the JSON

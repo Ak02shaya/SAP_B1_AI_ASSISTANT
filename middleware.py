@@ -510,10 +510,14 @@ FORMATTING RULES (all answers):
                         save_cached_sql(normalized_q, final_analytical_sql)
                         logger.info("Saved new query to SQLite Cache.")
 
-                    response_text = ""
-                    if response.content and hasattr(response.content[0], "text"):
-                        response_text = response.content[0].text
+                    response_text = "".join(
+                        block.text for block in response.content if block.type == "text"
+                    ).strip()
+
+                    if response_text:
                         yield json.dumps({"type": "chunk", "text": response_text}) + "\n"
+                    else:
+                        logger.warning(f"No text block found in response.content: {response.content}")
 
                     # Save turns into conversation cache so future follow-up questions retain context
                     save_turn(session_id, "user", request.question)
