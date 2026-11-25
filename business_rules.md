@@ -103,6 +103,7 @@
 | User may say                             | Means the same entity |
 |------------------------------------------|-----------------------|
 | "television", "TV", "pannel", "panel"    | Same category – resolve via dictionary tool |
+|"AIR COND", "AC", "air conditioner", "AIRCONDITIONER"|	Same category – resolve via dictionary tool
 
 Always resolve the exact database value through the `search_dictionary` tool. Never hardcode or guess.
 

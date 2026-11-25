@@ -21,7 +21,9 @@ ram_dictionary = {
     "state": [],
     "size": [],
     "color": [],
-    "account": []
+    "account": [],
+    "vendor": [],
+    "customer": []
 }
 def fetch_data_from_hana(query: str):
     """Helper to run a raw query and return a list of strings."""
@@ -53,7 +55,7 @@ def refresh_ram_dictionary():
     """Fetches unique values from SAP HANA and updates the dictionary."""
     global last_fetch_time, ram_dictionary
     
-    logger.info("🔄 Refreshing SAP Entity Dictionary in background...")
+    logger.info("Refreshing SAP Entity Dictionary in background...")
     
     branches = fetch_data_from_hana('SELECT DISTINCT "WhsName" FROM "OWHS"')
     brands = fetch_data_from_hana('SELECT DISTINCT "U_Brand" FROM "OITB"')
@@ -63,6 +65,8 @@ def refresh_ram_dictionary():
     sizes = fetch_data_from_hana('SELECT DISTINCT "U_SIZE" FROM "OITM"')
     colors = fetch_data_from_hana('SELECT DISTINCT "U_COLOR" FROM "OITM"')
     accounts = fetch_data_from_hana('SELECT DISTINCT "AcctName" FROM "OACT"')
+    vendors = fetch_data_from_hana('SELECT DISTINCT "CardName" FROM "OCRD" WHERE "CardType" = \'S\'')
+    customers = fetch_data_from_hana('SELECT DISTINCT "CardName" FROM "OCRD" WHERE "CardType" = \'C\'')
     
     ram_dictionary["branch"] = branches
     ram_dictionary["brand"] = brands
@@ -72,9 +76,11 @@ def refresh_ram_dictionary():
     ram_dictionary["state"] = states
     ram_dictionary["color"] = colors
     ram_dictionary["account"] = accounts
+    ram_dictionary["vendor"] = vendors
+    ram_dictionary["customer"] = customers
 
     last_fetch_time = time.time()
-    logger.info("✅ SAP Entity Dictionary updated successfully.")
+    logger.info("SAP Entity Dictionary updated successfully.")
     
 def ensure_cache_is_fresh():
     if time.time() - last_fetch_time > CACHE_DURATION_SECONDS:
@@ -86,7 +92,7 @@ def smart_spell_check(entity_type: str, search_terms: list):
     ensure_cache_is_fresh()
     
     entity_list = ram_dictionary.get(entity_type.lower(), [])
-    print(f"--- 🔍 DICTIONARY DEBUG: Checking {search_terms} against {len(entity_list)} {entity_type}s ---")
+    print(f"--- DICTIONARY DEBUG: Checking {search_terms} against {len(entity_list)} {entity_type}s ---")
     
     if not entity_list:
         return {"error": f"No data found for {entity_type}. (The RAM cache is empty!)"}
