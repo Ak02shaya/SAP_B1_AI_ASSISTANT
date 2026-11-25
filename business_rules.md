@@ -8,12 +8,7 @@
 **Header → Line joins** (always T0 = header, T1 = line):
 - `T0."DocEntry" = T1."DocEntry"`
 
-| Document Type      | Header Table | Line Table |
-|--------------------|-------------|------------|
-| Sales Invoice      | OINV        | INV1       |
-| Sales Return       | ORIN        | RIN1       |
-| Purchase Invoice   | OPCH        | PCH1       |
-| Purchase Return    | ORPC        | RPC1       |
+
 
 **Standard joins from line tables:**
 
@@ -23,9 +18,20 @@
 | 2    | Item → Item Group    | `INNER JOIN "OITB" T3 ON T2."ItmsGrpCod" = T3."ItmsGrpCod"`   |
 | 3    | Line → Warehouse     | `INNER JOIN "OWHS" T4 ON T1."WhsCode" = T4."WhsCode"`         |
 | 4    | Warehouse → Location | `INNER JOIN "OLCT" T5 ON T4."Location" = T5."Code"`           |
+| 5    | Line → Sales Employee | `INNER JOIN "OSLP" T7 ON T7."SlpCode" = T1."SlpCode"`        |
+| 6    | Line → Delivery Warehouse | `INNER JOIN "OWHS" T8 ON T8."WhsCode" = IFNULL(T1."U_DelWC", T1."WhsCode")` |
+
+
 
 > **Rule:** OITB is reachable ONLY through OITM. Never join OITB directly to a line table or OIVL.
 > **Rule:** Always use OWHS for warehouse, never OBPL.
+> **Rule:** Always exclude cancelled documents and  use T0."DocType" = 'I'.
+> **Rule:** Exclude default warehouses using T1."WhsCode" NOT LIKE 'DEF%'.
+> **Rule:** For branch-based sales and return analysis, always use warehouse mapping IFNULL(T1."U_DelWC", T1."WhsCode"), so the delivery warehouse takes priority and the original warehouse is used as fallback.
+> **Rule:** Exclude following card codes in sales and return queries using T2."CardCode" not like % PAI_ST%.
+
+
+
 
 **Stock (Inventory) joins:**
 - `FROM "OIVL" T0 INNER JOIN "OWHS" T1 ON T0."LocCode" = T1."WhsCode"`
@@ -103,7 +109,7 @@
 | User may say                             | Means the same entity |
 |------------------------------------------|-----------------------|
 | "television", "TV", "pannel", "panel"    | Same category – resolve via dictionary tool |
-|"AIR COND", "AC", "air conditioner", "AIRCONDITIONER"|	Same category – resolve via dictionary tool
+| "AIR COND", "AC", "air conditioner", "AIRCONDITIONER" | Same category – resolve via dictionary tool |
 
 Always resolve the exact database value through the `search_dictionary` tool. Never hardcode or guess.
 
