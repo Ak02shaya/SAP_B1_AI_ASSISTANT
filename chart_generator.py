@@ -47,7 +47,7 @@ LOOKUP_ONLY_KEYWORDS = re.compile(
 
 # --- 2. Column Classification Rules (Prevents IDs/Mobile/% from corrupting ₹ axes) ---
 NON_METRIC_COL_RE = re.compile(
-    r"\b(id|code|no|num|docnum|docentry|invoice|mobile|phone|contact|pin|zip|pincode|"
+    r"\b(id|code|no|num|docnum|docentry|mobile|phone|contact|pin|zip|pincode|"
     r"gst|pan|hsn|sac|sr|sno|sl|date|year|month)\b",
     re.IGNORECASE,
 )

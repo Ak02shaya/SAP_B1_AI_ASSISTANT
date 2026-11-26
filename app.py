@@ -115,62 +115,8 @@ if st.session_state.username:
 st.sidebar.button("Logout", on_click=handle_logout)
 st.sidebar.divider()
 
-
-@st.cache_data
-def load_festival_map():
-    current_year = datetime.now().year
-    dynamic_years = list(range(current_year - 2, current_year + 1))
-    states = [
-        "TN", "KA", "MH", "DL", "GJ", "UP", "RJ", "WB", "PB",
-        "HR", "JK", "CH", "TG", "AP", "KL", "OD", "MP", "BR",
-    ]
-
-    in_holidays = holidays.India(years=dynamic_years)
-    for state in states:
-        try:
-            in_holidays.update(holidays.India(years=dynamic_years, subdiv=state))
-        except NotImplementedError:
-            pass
-
-    f_map = {}
-    for dt, names in sorted(in_holidays.items()):
-        for name in names.split("; "):
-            f_map.setdefault(name, set()).add(dt)
-
-    return {name: sorted(dates) for name, dates in f_map.items()}
-
-
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
-festival_map = load_festival_map()
-
-with st.sidebar:
-    st.markdown("### 🎉 Festival Analysis")
-    selected_festival = st.selectbox("Select Festival", sorted(festival_map.keys()))
-
-    dates = festival_map[selected_festival]
-    selected_date = st.selectbox(
-        "Select Year",
-        dates,
-        index=len(dates) - 1,
-        format_func=lambda d: f"{d.year} ({d})",
-    )
-
-    col_before, col_after = st.columns(2)
-    with col_before:
-        days_before = st.number_input("Days before", min_value=0, max_value=31, value=0)
-    with col_after:
-        days_after = st.number_input("Days after", min_value=0, max_value=31, value=0)
-
-    start_dt = selected_date - timedelta(days=days_before)
-    end_dt = selected_date + timedelta(days=days_after)
-    st.caption(f"Range: {start_dt} to {end_dt}")
-
-    if st.button("Get Festival Sales", use_container_width=True):
-        question = f"Show total sales for {selected_festival} {selected_date.year} from {start_dt} to {end_dt}."
-        st.session_state.messages.append({"role": "user", "content": question})
-        st.rerun()
 
 
 # --- UI Helpers ---

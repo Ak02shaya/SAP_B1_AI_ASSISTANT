@@ -46,7 +46,7 @@
 | `"U_GC"`          | OITM  | Group Category (Level 1)                            |
 | `"U_HC"`          | OITM  | Head Category (Level 2)                             |
 | `"U_SubCategory"` | OITM  | Sub Category (Level 4)                              |
-| `"U_SIZE"`        | OITM  | Models / Sizes of Products                          |
+| `"U_SIZE"`        | OITM  | Sizes of Products                          |
 | `"U_GProp"`       | OITB  | Main Category (Level 3) – **DEFAULT for "category"**|
 | `"U_Brand"`       | OITB  | Brand                                               |
 | `"U_IsCenWhs"`    | OWHS  | Central warehouse flag ('Y' / 'N')                  |
@@ -58,6 +58,7 @@
 - If the user says "category" without specifying a level → use `"U_GProp"` (Level 3).
 - If the user names a specific level (e.g., "sub category", "group category") → use that level's field.
 - Use these fields ONLY for category, brand, or classification questions. Do not add them to unrelated queries.
+- MODEL / SIZE SEARCH: When the user specifies a product model, model number, or size (e.g., "18 PRO MAX", "32-Inch"), use the LIKE operator to search the OITM."ItemName" field. Match the specified text using an appropriate wildcard pattern (e.g., LIKE '%18 PRO MAX%' or LIKE '%32-Inch%'). Do not assume an exact ItemName match.
 
 ---
 
@@ -68,11 +69,16 @@
 - Unqualified "sales" or "purchases" always means invoices minus returns.
 - Show invoices or returns alone ONLY when the user explicitly asks.
 
+**Gross profit (sales only; use for any profit, margin or GP question):**
+- Per line: `Gross Profit = T1."GTotal" - T1."Quantity" * (T1."U_NLC" + T1."U_NLC" * T1."VatPrcnt" / 100)`. `"U_NLC"` is the cost without tax and `"VatPrcnt"` is the tax percent; both are on the line table (INV1, RIN1).
+- Use the same UNION ALL pattern as sales: SUM the gross profit expression from invoice lines (positive) and from return lines (negated), with the same filters on both parts.
+
 **Amount fields:**
 - `"GTotal"` = row-level with-tax amount (on INV1, RIN1, PCH1, RPC1). **Use this by default.**
 - `"LineTotal"` = use ONLY if the user asks for "without tax", "pre-tax", "excluding GST", or "taxable value".
 - **Never use** `"DocTotal"` (header-level). Never sum header amounts after joining lines.
 - **Never** add `"LineTotal"` + `"VatSum"`. Use the same field on both invoice and return parts.
+
 
 **UNION ALL pattern (mandatory for net calculations):**
 - Stack invoices (positive) and returns (negative with minus sign) in a derived table using `UNION ALL`.
