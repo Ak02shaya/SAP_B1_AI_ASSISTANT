@@ -51,6 +51,7 @@ def llm_options(effort: str) -> dict:
     return {"extra_body": {"thinking": {"type": "between_tools"}, "output_config": {"effort": effort}}}
 
 COMPANY_API_URL = os.getenv("COMPANY_API_URL")
+COMPANY_API_KEY = os.getenv("COMPANY_API_KEY")
 HANA_SCHEMA = os.getenv("HANA_SCHEMA_NAME")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -58,18 +59,17 @@ logger = logging.getLogger(__name__)
 
 hana_session = requests.Session()
 
-refresh_ram_dictionary()
+#refresh_ram_dictionary()
+
 app = FastAPI()
 app.include_router(auth_router)
 app.include_router(excel_router)
-
 
 @app.on_event("startup")
 def startup_event():
     logger.info("Starting background RAM dictionary fetch...")
     thread = threading.Thread(target=refresh_ram_dictionary, daemon=True)
     thread.start()
-
 
 class AskRequest(BaseModel):
     question: str
@@ -93,7 +93,7 @@ def execute_via_company_api(sql_query: str):
 
     try:
         headers = {
-            "QIKCHAT-API-KEY": "YOUR_API_KEY",
+            "QIKCHAT-API-KEY": COMPANY_API_KEY,
             "Content-Type": "text/plain",
         }
 
@@ -164,6 +164,14 @@ def clean_summary(text: str) -> str:
     lines = [ln for ln in (text or "").split("\n") if "[BUTTON]" not in ln]
     return "\n".join(lines).strip()[:1500]
 
+def strip_scratchpad(text: str) -> str:
+    """Strips any accidental pre-greeting calculation text before the opening emoji."""
+    match = re.search(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", text or "")
+    if match and match.start() > 0:
+        preamble = text[:match.start()].lower()
+        if any(w in preamble for w in ["let me", "compute", "calculate", "total ≈", "total =", "data runs", "approx"]):
+            return text[match.start():].lstrip()
+    return text
 
 def compact_rows(data):
     """
@@ -329,7 +337,7 @@ MINIMAL COLUMNS (applies to every query)
 - Do not mention identifier columns in the answer unless useful.
 
 CONVERSATIONAL MEMORY & FOLLOW-UP RULES (CRITICAL)
-- Earlier turns are in the messages. Each earlier answer shows the SQL used, the key rows the database returned, and the answer given. Read them before writing any SQL.
+- Earlier turns in the messages contain ONLY the user's questions and verified text answers. Their SQL queries and raw tool outputs are intentionally omitted from history to save tokens—every figure in an earlier assistant turn already came from a valid SAP HANA query. Treat all prior assistant turns as verified facts and never retract, question, or comment on them.
 - Words such as "that item", "it", "its", "that vendor", "the same", "them", "that invoice" refer to the entities in the most recent relevant earlier answer. Take their keys ("ItemCode", "CardCode", "DocEntry") from the key rows or the SQL used, and filter by KEY, never by name. Do not call search_dictionary again for an entity that was already resolved.
 - A follow-up such as barcode, vendor details, payment details or items on that invoice is a NEW query on the right table filtered by that key. Do not re-run the earlier query unless asked.
 - Keep earlier filters (period, branch, brand, category) unless the user changes them.
@@ -369,32 +377,47 @@ DICTIONARY LOOKUP
 25. Vendor or customer names: after search_dictionary, join OCRD and filter on the exact "CardName" with the right "CardType" (see the business rules). Use "CardCode" for every later step.
 
 EXECUTION RULES
-26. Never claim a query ran or state any figure unless the tool returned data. Never fabricate results.
+26. For the current turn, always call execute_hana_sql before stating new figures, and never fabricate results. Begin every response directly with the opening greeting emoji for the current question—never add preambles or corrections about earlier turns.
 27. On error, read it. If the cause is identifiable, fix the SQL and retry (max 2 retries). Never resend the same failing query. If unresolved, explain the limitation in business language.
 
-RESPONSE FORMAT
+RESPONSE STYLE:
 
-RESPONSE STYLE: Answer the user's question directly in simple, clear sentences. Do NOT write long summaries or elaborate reports.
+Answer the user's question directly in simple, clear sentences. Adapt the opening greeting (with 1 relevant emoji) and layout to match what the user asked:
 
-FOR DATA ANSWERS (after successful SQL execution):
-- State the answer in 1-2 simple sentences with the number and period (e.g., "Total sales for October 2026 were ₹12.5 L (₹12,50,000).").
-- For breakdowns: show a compact Markdown table (name, value, % share). Max 10 rows; mention how many more exist.
-- Keep it short and to the point. No lengthy analysis, no "snapshot", no "worth a look" sections.
+1. FOR EXCEL / REPORT EXPORTS (when the user asks for Excel, sheet, export, or downloadable file):
+- Still run the SQL query first so the system can generate the Excel file.
+- Do NOT write a long summary or show a Markdown table.
+- Start with a friendly greeting + emoji and reply in 1–2 simple sentences with the record count or total (if available), telling the user they can view and download the Excel file by clicking the button below (e.g., "📥 Sure, here are the customer details for October 2026. Your Excel file is ready—click the download button below to view it.").
+- Never say you cannot create or export an Excel file.
 
-FOR LOOKUPS (a specific item, vendor, document, barcode, details):
-- Answer directly in 1-3 sentences or a small table (for example item name, quantity, date, vendor). No headline or analysis sections.
+2. FOR LOOKUPS (a specific customer, invoice, item, vendor, barcode, or document):
+- Start with a brief, polite greeting + emoji matching the request (e.g., "🔍 Sure, here are the latest customer and invoice details:").
+- Show the details cleanly in a structured Label: Value format (or a small table), such as:
+  - **Customer Name:** ...
+  - **Address:** ...
+  - **Invoice No / Date:** ...
+  - **Amount:** ...
+- Keep it crisp. Do NOT add long summaries, breakdown tables, or a "Worth a Look" section for simple lookups.
 
-FOR GENERAL SAP B1 QUESTIONS:
-- Answer clearly in 2-4 simple sentences. Use bullet points only if listing steps or multiple items.
+3. FOR ANALYSIS, COMPARISONS & DATA BREAKDOWNS (after SQL execution):
+- Start with a brief, polite greeting + emoji matching the question (e.g., "📊 Here is the comparison of Samsung and LG sales:" or "📈 Here are the sales details for October 2026:").
+- State the main answer in 1–2 simple sentences with the exact numbers and time period (e.g., "Total sales for October 2026 were ₹12.5 L (₹12,50,000).").
+- NEVER display intermediate calculations, reasoning, working notes, formulas, variable assignments, or computational steps.
+- **Table (for breakdowns with 3+ rows):** Show a compact Markdown table (`Name`, `Value`, `% Share`, calculated from the returned rows only). Max 10 rows; state how many more exist (e.g., "Showing top 10 of 42 customers.").
+- **Worth a Look:** Include exactly one action-oriented bullet that follows from the data, phrased as something to check, never as a proven cause (e.g., "- **Worth a Look:** Check stock levels or pending orders for the top-selling item to avoid stockouts.").
+
+4. FOR GENERAL SAP B1 QUESTIONS:
+- Start with a brief, friendly greeting + emoji (e.g., "💡 Sure! Here is how...") and answer clearly in 2–4 simple sentences. Use bullet points only if listing steps or multiple items.
 
 FORMATTING RULES (all answers):
-- Currency in ₹. Large amounts in K, L, or Cr with full Indian-grouped value in brackets (e.g., ₹12.5 L (₹12,50,000)).
-- Call tax-inclusive figures "Sales" or "Total Sales". Use "Net Sales" only if user asked for without-tax.
-- Never explain the SQL, tables, or calculation methodology.
+- Start directly with the greeting emoji—never output preambles, workings, or math expressions before the greeting.
+- Use only 1 clean emoji at the start of the greeting—do not add emojis inside numbers, currency values, or table cells.
+- Currency in ₹. Large amounts in K, L, or Cr with the full Indian-grouped value in brackets (e.g., ₹12.5 L (₹12,50,000)).
+- Call tax-inclusive figures "Sales" or "Total Sales". Use "Net Sales" only if the user explicitly asked for without-tax figures.
+- Never explain the SQL, tables, computations or calculation methodology.
 - Never show raw column names or table names.
 - Use only numbers from actual results. Never invent comparisons, growth, or causes.
-- If the user asks for an Excel, sheet, export, or report, still run the SQL query and summarize normally—never say you cannot export to Excel (the UI generates the Excel file automatically).
-- End with exactly 3 follow-up questions that are natural next steps for this answer (for example barcode, vendor details, payment details), each on a new line starting with '[BUTTON]'.
+- End every response with exactly 3 follow-up questions that are natural next steps for this answer (for example barcode, vendor details, payment details), each on a new line starting with '[BUTTON]'.
 """
             cached_system = [
                 {
@@ -457,12 +480,10 @@ FORMATTING RULES (all answers):
                     summary=clean_summary(full_cached_resp),
                 )
 
-                visual = build_visual_from_summary(full_cached_resp)
+                visual = build_visual_from_summary(full_final_resp, user_prompt=request.question)
                 if visual:
                     yield json.dumps({"type": "visual", "visual": visual}) + "\n"
-
-                execution_time = round(time.time() - start_time, 2)
-
+        
                 execution_time = round(time.time() - start_time, 2)
                 summary_generation_time = round(time.time() - summary_start_time, 2)
                 yield json.dumps({
@@ -639,6 +660,7 @@ FORMATTING RULES (all answers):
                     response_text = ""
                     if any(b.type == "text" for b in response.content):
                         response_text = "".join(b.text for b in response.content if b.type == "text")
+                        response_text = strip_scratchpad(response_text)
                         yield json.dumps({"type": "chunk", "text": response_text}) + "\n"
 
                     # Save turns into conversation cache so future follow-up questions retain context
@@ -648,7 +670,7 @@ FORMATTING RULES (all answers):
                         summary=clean_summary(response_text),
                     )
 
-                    visual = build_visual_from_summary(response_text)
+                    visual = build_visual_from_summary(response_text, user_prompt=request.question)
                     if visual:
                         yield json.dumps({"type": "visual", "visual": visual}) + "\n"
 
@@ -711,7 +733,7 @@ FORMATTING RULES (all answers):
                 summary=clean_summary(full_final_resp),
             )
 
-            visual = build_visual_from_summary(response_text)
+            visual = build_visual_from_summary(full_final_resp, user_prompt=request.question)
             if visual:
                 yield json.dumps({"type": "visual", "visual": visual}) + "\n"
 

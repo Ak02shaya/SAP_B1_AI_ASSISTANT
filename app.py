@@ -10,7 +10,6 @@ import holidays
 load_dotenv()
 MIDDLEWARE_BASE_URL = os.getenv("MIDDLEWARE_BASE_URL", "http://localhost:8000")
 
-
 st.set_page_config(page_title="SAP B1 Copilot", layout="centered")
 
 # --- Auth (Database Sign-In Gate) ---
@@ -61,8 +60,10 @@ if not st.session_state.authenticated:
     st.stop()
 
 
+# --- Excel Helpers ---
 EXPORT_KEYWORDS = r"\b(excel|xlsx|sheet|spreadsheet|export|download|report|generate|make|create|file)\b"
-FOLLOWUP_FILLERS = r"\b(excel|xlsx|sheet|spreadsheet|export|download|report|generate|give|get|make|create|file)\b"
+FOLLOWUP_FILLERS = r"\b(excel|xlsx|sheet|spreadsheet|export|download|report|generate|give|get|make|create|file|me|the|a|an|it|this|that|as|in|to|into|please|pls|for|of|above|previous|same|data|result|results)\b"
+
 
 def wants_excel(prompt: str) -> bool:
     """Triggers Excel download if any export/generate keyword is present."""
@@ -73,7 +74,6 @@ def is_followup_export(prompt: str) -> bool:
     """True ONLY when the message is a pure export command with no new question words."""
     if not wants_excel(prompt):
         return False
-    # Remove all export/filler words and punctuation
     remaining = re.sub(FOLLOWUP_FILLERS, "", prompt.lower())
     remaining = re.sub(r"[^a-z0-9]", "", remaining)
     return len(remaining) == 0
@@ -101,21 +101,18 @@ def handle_logout():
         )
     except Exception:
         pass
-    st.session_state.update(authenticated=False, login_attempts=0, messages=[])
+    st.session_state.update(
+        authenticated=False,
+        username=None,
+        login_attempts=0,
+        messages=[],
+    )
 
+
+if st.session_state.username:
+    st.sidebar.caption(f"👤 Signed in as: **{st.session_state.username}**")
 
 st.sidebar.button("Logout", on_click=handle_logout)
-
-st.sidebar.divider()
-st.sidebar.markdown("### 🛠️ Admin Controls")
-if st.sidebar.button("🔄 Refresh Schema Cache"):
-    try:
-        res = requests.post(f"{MIDDLEWARE_BASE_URL}/api/v1/clear_cache", timeout=10)
-        res.raise_for_status()
-        st.sidebar.success("Cache cleared! New custom fields will be detected.")
-    except requests.exceptions.RequestException as e:
-        st.sidebar.error(f"Failed to clear cache: {e}")
-
 st.sidebar.divider()
 
 
@@ -183,6 +180,7 @@ def render_visual(visual, chart_key: str = "chart_default"):
     if visual.get("visual_type") == "chart" and visual.get("plotly_fig"):
         st.plotly_chart(visual["plotly_fig"], width="stretch", key=chart_key)
 
+
 def render_assistant_content(m, is_latest=True, msg_idx=0):
     if m.get("is_clarification"):
         st.warning(m["content"])
@@ -200,7 +198,7 @@ def render_assistant_content(m, is_latest=True, msg_idx=0):
                 st.markdown("**🔍 AI Generated SQL & Routing:**")
                 st.code(m["sql"], language="sql")
 
-        st.markdown(f"### 📊 Business Insight:\n{m['content']}")
+        st.markdown(m["content"])
 
         render_visual(m.get("visual"), chart_key=f"chart_hist_{msg_idx}")
 
@@ -283,7 +281,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                             st.session_state.messages.append(
                                 {
                                     "role": "assistant",
-                                    "content": "Your full Excel report is ready to download below.",
+                                    "content": "📥 Your full Excel report is ready to download below.",
                                     "sql": last_sql,
                                     "tables": ["Exported from previous query"],
                                     "excel_bytes": exp_res.content,
@@ -356,7 +354,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
 
                         elif chunk["type"] == "chunk":
                             full_response += chunk["text"]
-                            insight_placeholder.markdown(f"### 📊 Business Insight:\n{full_response}▌")
+                            insight_placeholder.markdown(f"{full_response}▌")
 
                         elif chunk["type"] == "visual":
                             captured_visual = chunk.get("visual")
@@ -396,7 +394,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                             clean_lines.append(line)
 
                     full_response = "\n".join(clean_lines).strip()
-                    insight_placeholder.markdown(f"### 📊 Business Insight:\n{full_response}")
+                    insight_placeholder.markdown(full_response)
 
                     if captured_sql and wants_excel(user_input):
                         with st.spinner("Generating full Excel report..."):

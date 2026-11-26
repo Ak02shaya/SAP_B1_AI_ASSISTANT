@@ -28,10 +28,9 @@ ram_dictionary = {
 def fetch_data_from_hana(query: str):
     """Helper to run a raw query and return a list of strings."""
     url = os.getenv("COMPANY_API_URL")
-    #api_key = os.getenv("COMPANY_API_KEY")
 
     headers = {
-        "QIKCHAT-API-KEY": "COMPANY_API_URL",
+        "QIKCHAT-API-KEY": "COMPANY_API_KEY",
         "Content-Type": "text/plain"
     }
     try:
@@ -58,15 +57,15 @@ def refresh_ram_dictionary():
     logger.info("Refreshing SAP Entity Dictionary in background...")
     
     branches = fetch_data_from_hana('SELECT DISTINCT "WhsName" FROM "OWHS"')
-    brands = fetch_data_from_hana('SELECT DISTINCT "U_Brand" FROM "OITB"')
-    categories = fetch_data_from_hana('SELECT DISTINCT "U_GProp" FROM "OITB"')
-    items = fetch_data_from_hana('SELECT DISTINCT "ItemName" FROM "OITM"')
+    brands = fetch_data_from_hana('SELECT DISTINCT "U_Brand" FROM "OITB" WHERE "U_Brand" IS NOT NULL')
+    categories = fetch_data_from_hana('SELECT DISTINCT "U_GProp" FROM "OITB" WHERE "U_Brand" IS NOT NULL')
+    items = fetch_data_from_hana('SELECT DISTINCT "ItemName" FROM "OITM" WHERE "validFor" = \'Y\'')
     states = fetch_data_from_hana('SELECT DISTINCT "Location" FROM "OLCT"')
-    sizes = fetch_data_from_hana('SELECT DISTINCT "U_SIZE" FROM "OITM"')
-    colors = fetch_data_from_hana('SELECT DISTINCT "U_COLOR" FROM "OITM"')
+    sizes = fetch_data_from_hana('SELECT DISTINCT "U_SIZE" FROM "OITM" WHERE "validFor" = \'Y\' AND "U_SIZE" IS NOT NULL')
+    colors = fetch_data_from_hana('SELECT DISTINCT "U_COLOR" FROM "OITM" WHERE "validFor" = \'Y\' AND "U_COLOR" IS NOT NULL')
     accounts = fetch_data_from_hana('SELECT DISTINCT "AcctName" FROM "OACT"')
-    vendors = fetch_data_from_hana('SELECT DISTINCT "CardName" FROM "OCRD" WHERE "CardType" = \'S\'')
-    customers = fetch_data_from_hana('SELECT DISTINCT "CardName" FROM "OCRD" WHERE "CardType" = \'C\'')
+    vendors = fetch_data_from_hana('SELECT DISTINCT "CardName" FROM "OCRD" WHERE "CardType" = \'S\' AND "validFor" = \'Y\'')
+    customers = fetch_data_from_hana('SELECT DISTINCT "CardName" FROM "OCRD" WHERE "CardType" = \'C\' AND "validFor" = \'Y\'')
     
     ram_dictionary["branch"] = branches
     ram_dictionary["brand"] = brands
