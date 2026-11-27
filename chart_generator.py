@@ -1,6 +1,7 @@
 import json
 import re
 import pandas as pd
+# pyrefly: ignore[missing-import]
 import plotly.express as px
 
 
@@ -196,6 +197,22 @@ def build_plotly_figure(
     else:
         tick_prefix, tick_suffix, tick_fmt = "", "", ",.0f"
 
+    if metric_unit == "currency":
+        val_fmt = "₹%{value:,.0f}"
+        axis_val_fmt = "₹%{y:,.0f}"
+        hbar_val_fmt = "₹%{x:,.0f}"
+        tick_prefix, tick_suffix, tick_fmt = "₹", "", ",.0f"
+    elif metric_unit == "percent":
+        val_fmt = "%{value:,.1f}%"
+        axis_val_fmt = "%{y:,.1f}%"
+        hbar_val_fmt = "%{x:,.1f}%"
+        tick_prefix, tick_suffix, tick_fmt = "", "%", ",.1f"
+    else:
+        val_fmt = "%{value:,.0f}"
+        axis_val_fmt = "%{y:,.0f}"
+        hbar_val_fmt = "%{x:,.0f}"
+        tick_prefix, tick_suffix, tick_fmt = "", "", ",.0f"
+
     if chart_type == "line":
         fig = px.line(
             plot_df,
@@ -203,9 +220,14 @@ def build_plotly_figure(
             y=y_cols,
             markers=True,
             title=title,
-            hover_data={"_full_label": True, "_display_label": False},
+            custom_data=["_full_label"],
         )
-        fig.update_traces(line=dict(width=3), marker=dict(size=8))
+        line_hover = "<b>%{customdata[0]}</b><br>%{data.name}: " + axis_val_fmt + "<extra></extra>" if len(y_cols) > 1 else "<b>%{customdata[0]}</b><br>" + y_cols[0] + ": " + axis_val_fmt + "<extra></extra>"
+        fig.update_traces(
+            line=dict(width=3),
+            marker=dict(size=8),
+            hovertemplate=line_hover,
+        )
 
     elif chart_type == "area":
         fig = px.area(
@@ -213,22 +235,25 @@ def build_plotly_figure(
             x="_display_label",
             y=y_cols,
             title=title,
-            hover_data={"_full_label": True, "_display_label": False},
+            custom_data=["_full_label"],
         )
+        area_hover = "<b>%{customdata[0]}</b><br>%{data.name}: " + axis_val_fmt + "<extra></extra>" if len(y_cols) > 1 else "<b>%{customdata[0]}</b><br>" + y_cols[0] + ": " + axis_val_fmt + "<extra></extra>"
+        fig.update_traces(hovertemplate=area_hover)
 
     elif chart_type == "pie":
         fig = px.pie(
             plot_df,
-            names="_display_label",
+            names="_full_label",
             values=y_cols[0],
-            hole=0.42,
+            hole=0.38,
             title=title,
-            hover_data={"_full_label": True},
+            custom_data=["_full_label"],
         )
         fig.update_traces(
-            textposition="inside",
-            textinfo="percent",
+            textposition="auto",
+            textinfo="percent+label",
             insidetextorientation="horizontal",
+            hovertemplate="<b>%{label}</b><br>" + y_cols[0] + f": {val_fmt}<br>Share: %{{percent}}<extra></extra>",
         )
 
     elif chart_type == "hbar":
@@ -239,7 +264,10 @@ def build_plotly_figure(
             y="_display_label",
             orientation="h",
             title=title,
-            hover_data={"_full_label": True, "_display_label": False},
+            custom_data=["_full_label"],
+        )
+        fig.update_traces(
+            hovertemplate="<b>%{customdata[0]}</b><br>" + y_cols[0] + ": " + hbar_val_fmt + "<extra></extra>"
         )
         fig.update_yaxes(autorange="reversed", title_text="", automargin=True)
         fig.update_xaxes(
@@ -257,8 +285,10 @@ def build_plotly_figure(
             y=y_cols,
             barmode="group",
             title=title,
-            hover_data={"_full_label": True, "_display_label": False},
+            custom_data=["_full_label"],
         )
+        bar_hover = "<b>%{customdata[0]}</b><br>%{data.name}: " + axis_val_fmt + "<extra></extra>" if len(y_cols) > 1 else "<b>%{customdata[0]}</b><br>" + y_cols[0] + ": " + axis_val_fmt + "<extra></extra>"
+        fig.update_traces(hovertemplate=bar_hover)
 
     # Anti-overlap layout rules for standard vertical X/Y charts
     if chart_type in ("bar", "grouped_bar", "line", "area"):
@@ -268,6 +298,8 @@ def build_plotly_figure(
             title_text="",
             tickangle=tick_angle,
             automargin=True,
+            color="#A1A7B5",
+            gridcolor="rgba(255, 255, 255, 0.06)",
         )
         fig.update_yaxes(
             title_text=y_cols[0] if len(y_cols) == 1 else "",
@@ -275,6 +307,8 @@ def build_plotly_figure(
             ticksuffix=tick_suffix,
             tickformat=tick_fmt,
             automargin=True,
+            color="#A1A7B5",
+            gridcolor="rgba(255, 255, 255, 0.06)",
         )
 
     dynamic_height = max(350, min(600, row_count * 42 + 130)) if chart_type == "hbar" else 400
@@ -286,8 +320,15 @@ def build_plotly_figure(
         plot_bgcolor="rgba(0,0,0,0)",
         uniformtext_minsize=11,
         uniformtext_mode="hide",
-        hovermode="closest" if chart_type in ("pie", "hbar") else "x unified",
-        title=dict(x=0.0, xanchor="left", font=dict(size=16)),
+        hovermode="closest",
+        hoverlabel=dict(
+            bgcolor="#1E222A",
+            font_size=13,
+            font_family="Inter, sans-serif",
+            font_color="#F4F4F6",
+            bordercolor="rgba(255, 255, 255, 0.15)",
+        ),
+        title=dict(x=0.0, xanchor="left", font=dict(size=16, color="#F4F4F6")),
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -295,6 +336,7 @@ def build_plotly_figure(
             xanchor="right",
             x=1.0,
             title_text="",
+            font=dict(color="#A1A7B5", size=12),
         ),
         margin=dict(l=20, r=25, t=65, b=30),
     )

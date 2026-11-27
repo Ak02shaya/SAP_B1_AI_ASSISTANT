@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+# pyrefly: ignore[missing-import]
 import anthropic
 import os
 import json
@@ -61,7 +62,29 @@ hana_session = requests.Session()
 
 #refresh_ram_dictionary()
 
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.middleware("http")
+async def add_no_cache_headers(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.endswith((".css", ".js", ".html")) or path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 app.include_router(auth_router)
 app.include_router(excel_router)
 
@@ -264,12 +287,34 @@ def clear_conversation_history(request: ClearConversationRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def normalize_spoken_query(question: str) -> str:
+    """Corrects common voice transcription acoustic and phonetic slips into canonical SAP B1 terms."""
+    q = question
+    replacements = [
+        (r"\b(cross|growth|gross)\s+(profit|profile|product|prove\s*it)\b", "gross profit"),
+        (r"\b(cross|growth)\s+margin\b", "gross margin"),
+        (r"\b(sub\s*hana|sapna|sep\s*hana|sap\s*hanna)\b", "SAP HANA"),
+        (r"\b(where\s*house|wear\s*house|ware\s*houses|where\s*houses)\b", "warehouse"),
+        (r"\bgo\s*down\b", "godown"),
+        (r"\b(dock|dog|dark)\s+num(ber)?\b", "DocNum"),
+        (r"\b(dock|dog|dark)\s+entry\b", "DocEntry"),
+        (r"\b(just\s*in)\b", "GSTIN"),
+        (r"\b(good\s*rage|god\s*rage|god\s*rich)\b", "Godrej"),
+        (r"\b(we\s*won|veevo|we\s*bow)\b", "Vivo"),
+        (r"\b(some\s*sung)\b", "Samsung"),
+        (r"\b(neck|net)\s+sales?\b", "net sales"),
+    ]
+    for pattern, repl in replacements:
+        q = re.sub(pattern, repl, q, flags=re.IGNORECASE)
+    return q
+
+
 @app.post("/api/v1/ask")
 def ask_copilot(request: AskRequest):
     def generate_stream():
         start_time = time.time()
         current_date = datetime.now().strftime("%Y-%m-%d")
-        normalized_q = request.question.strip().lower()
+        normalized_q = normalize_spoken_query(request.question.strip())
         session_id = request.session_id or "default"
 
         total_in_tokens = 0
@@ -292,6 +337,15 @@ DATA QUESTIONS (Administration, Financials, CRM, Opportunities, Sales - A/R, Pur
 TODAY'S DATE: {current_date}
 CURRENT YEAR: {current_year}
 DATABASE SCHEMA: {HANA_SCHEMA}
+
+SPEECH-TO-TEXT & PHONETIC TOLERANCE:
+The user's query may originate from voice transcription and contain acoustic slips. Always resolve them to canonical SAP B1 concepts:
+- "cross profit" / "growth profit" / "gross product" -> Gross Profit
+- "sub hana" / "sapna" -> SAP HANA
+- "where house" / "wear house" -> Warehouse
+- "dock number" / "dog num" -> DocNum
+- "just in" / "testing" (in tax/compliance context) -> GSTIN
+- Misheard brand or party names -> resolve to the closest matching brand, customer, or vendor in the company database.
 
 BUSINESS RULES (authoritative, follow literally):
 These rules describe this company's data, custom fields, definitions and relationships. They are authoritative and override general SAP knowledge. Follow them literally.
@@ -754,3 +808,10 @@ FORMATTING RULES (all answers):
             yield json.dumps({"type": "error", "text": f"System Error: {str(e)}"}) + "\n"
 
     return StreamingResponse(generate_stream(), media_type="application/x-ndjson")
+
+
+# Mount static directory for modern HTML/CSS/JS frontend
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if not os.path.exists(STATIC_DIR):
+    os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

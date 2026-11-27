@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vantage AI • SAP Business One Intelligence</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Plotly JS CDN for interactive charts -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <!-- Marked CDN for markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  
+  <link rel="stylesheet" href="style.css?v=2.2" />
+</head>
+<body>
+
+  <!-- ==================== 1. LOGIN SCREEN (PERMANENT SLEEK DARK) ==================== -->
+  <div id="login-screen" class="login-viewport">
+    
+    <!-- Top System Header Bar -->
+    <header class="login-topbar">
+      <div class="system-status">
+        <span class="status-dot"></span>
+        <span>SAP HANA Gateway • Online</span>
+      </div>
+      <div class="system-badge">
+        <span>ENTERPRISE AI</span>
+      </div>
+    </header>
+
+    <!-- Centered Glassmorphic Card (Zero Vertical Scroll) -->
+    <main class="login-card-wrapper">
+      <div class="login-card">
+        
+        <div class="card-brand-header">
+          <div class="brand-halo">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#10A37F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2 17L12 22L22 17" stroke="#10A37F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2 12L12 17L22 12" stroke="#10A37F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <span class="brand-pill">VANTAGE AI • SAP BUSINESS ONE</span>
+          <h1 class="card-title">Welcome to Vantage AI</h1>
+          <p class="card-subtitle">Real-time enterprise intelligence, inventory audit, and revenue analytics</p>
+        </div>
+
+        <form id="login-form">
+          <div id="login-error" class="login-error-alert hidden"></div>
+
+          <div class="form-group">
+            <label for="username">Username</label>
+            <div class="input-container">
+              <span class="input-icon">👤</span>
+              <input type="text" id="username" placeholder="e.g. manager" required autocomplete="username" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="password">Password</label>
+            <div class="input-container">
+              <span class="input-icon">🔒</span>
+              <input type="password" id="password" placeholder="••••••••••••" required autocomplete="current-password" />
+              <button type="button" id="toggle-password" class="eye-toggle-btn" title="Show/Hide password">👁</button>
+            </div>
+          </div>
+
+          <button type="submit" id="login-btn" class="primary-btn">
+            <span>Sign In to Workspace</span>
+            <span class="btn-arrow">→</span>
+          </button>
+        </form>
+
+        <footer class="card-security-footer">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <span>Secured by SAP HANA Enterprise Gateway</span>
+        </footer>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- ==================== 2. CHAT APP SCREEN ==================== -->
+  <div id="app-screen" class="app-layout hidden">
+    
+    <!-- Left Sidebar -->
+    <aside class="sidebar">
+      
+      <div class="sidebar-header">
+        <div class="sidebar-brand">
+          <div class="sidebar-brand-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#10A37F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2 17L12 22L22 17" stroke="#10A37F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2 12L12 17L22 12" stroke="#10A37F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div>
+            <div class="sidebar-title">Vantage AI</div>
+            <div class="sidebar-caption">SAP B1 Intelligence</div>
+          </div>
+        </div>
+      </div>
+
+      <button id="new-chat-btn" class="new-chat-btn">
+        <span style="font-size: 16px;">＋</span>
+        <span>New Conversation</span>
+      </button>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Scrollable Recent Conversations (Dynamic Per User) -->
+      <div class="sidebar-conversations-section">
+        <div class="conversations-header">
+          <span class="conversations-title">Recent Chats</span>
+          <span class="conv-count-badge" id="conv-count-badge">0</span>
+        </div>
+        <div id="conversations-list" class="conversations-list">
+          <!-- Dynamically populated per user -->
+        </div>
+      </div>
+
+      <!-- Compact Active User Profile Card (Emerald Avatar + Online Pulse) -->
+      <div class="sidebar-user-section">
+        <div class="user-profile-card">
+          <div class="user-avatar-circle" id="user-avatar-initial">A</div>
+          <div class="user-profile-info">
+            <div class="user-profile-name" id="sidebar-user-name">Admin</div>
+            <div class="user-profile-status">
+              <span class="status-pulse-dot"></span>
+              <span>Online</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Split Action Pill Row (50% / 50% Clear Cache & Logout) -->
+        <div class="sidebar-split-actions">
+          <button id="clear-session-btn" class="sidebar-split-btn" title="Clear Chat Cache">
+            <span>🗑️</span>
+            <span>Clear Cache</span>
+          </button>
+          <button id="logout-btn" class="sidebar-split-btn logout" title="Sign Out">
+            <span>🚪</span>
+            <span>Logout</span>
+          </button>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Top Bar -->
+      <header class="app-topbar">
+        <div class="topbar-left">
+          <span class="status-dot"></span>
+          <span class="topbar-status-text">SAP HANA Live Gateway</span>
+        </div>
+        <div class="topbar-right">
+          <span class="status-pill">Enterprise Connected</span>
+        </div>
+      </header>
+
+      <!-- Chat Messages Container -->
+      <div id="chat-messages-container" class="chat-messages-container">
+        
+        <!-- Empty State Hero & Starter Cards -->
+        <div id="empty-state" class="empty-state">
+          <div class="empty-hero">
+            <h2 class="empty-title">What business insight are you looking for today?</h2>
+            <p class="empty-subtitle">Ask any question about sales, inventory, gross profit, customers, or branches.</p>
+          </div>
+
+          <div class="starter-grid">
+            <div class="starter-card" data-prompt="Show me the top 5 selling brands with revenue">
+              <div class="starter-icon">📊</div>
+              <div class="starter-title">Top Selling Brands</div>
+              <div class="starter-desc">Show me the top 5 selling brands with revenue</div>
+            </div>
+
+            <div class="starter-card" data-prompt="What is our gross profit margin by category?">
+              <div class="starter-icon">💰</div>
+              <div class="starter-title">Gross Profit Breakdown</div>
+              <div class="starter-desc">What is our gross profit margin by category?</div>
+            </div>
+
+            <div class="starter-card" data-prompt="Show current stock quantity and value by warehouse">
+              <div class="starter-icon">📦</div>
+              <div class="starter-title">Warehouse Stock Status</div>
+              <div class="starter-desc">Show current stock quantity and value by warehouse</div>
+            </div>
+
+            <div class="starter-card" data-prompt="List the top 10 customers by net sales amount">
+              <div class="starter-icon">👥</div>
+              <div class="starter-title">Top Customers by Sales</div>
+              <div class="starter-desc">List the top 10 customers by net sales amount</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat history items will be dynamically appended here -->
+        <div id="messages-list" class="messages-list"></div>
+
+      </div>
+
+      <!-- Bottom Floating Chat Input Area -->
+      <div class="chat-input-wrapper">
+        <form id="chat-form" class="chat-form">
+          <textarea
+            id="prompt-input"
+            class="chat-input"
+            placeholder="Ask about sales, stock, customers, or click mic to speak..."
+            rows="1"
+          ></textarea>
+          
+          <!-- Voice-to-Text Microphone Button -->
+          <button type="button" id="mic-btn" class="mic-btn" title="Voice to Text (Click to speak)">
+            🎤
+          </button>
+
+          <!-- Send Button -->
+          <button type="submit" id="send-btn" class="send-btn" title="Send message">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </form>
+        <div class="chat-disclaimer">
+          Vantage AI can analyze complex ERP transactions. Verify key financial figures.
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+
+  <script src="app.js?v=2.2"></script>
+</body>
+</html>

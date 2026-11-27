@@ -1,3 +1,4 @@
+# pyrefly: ignore[missing-import]
 import streamlit as st
 import requests
 import os
@@ -5,6 +6,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+# pyrefly: ignore[missing-import]
 import holidays
 
 load_dotenv()
