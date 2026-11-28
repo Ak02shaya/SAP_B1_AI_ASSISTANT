@@ -62,7 +62,8 @@ if not st.session_state.authenticated:
 
 # --- Excel Helpers ---
 EXPORT_KEYWORDS = r"\b(excel|xlsx|sheet|spreadsheet|export|download|report|generate|make|create|file)\b"
-FOLLOWUP_FILLERS = r"\b(excel|xlsx|sheet|spreadsheet|export|download|report|generate|give|get|make|create|file|me|the|a|an|it|this|that|as|in|to|into|please|pls|for|of|above|previous|same|data|result|results)\b"
+#EXPORT_KEYWORDS = r"\b(excel|xlsx|sheet|spreadsheet|export|download|downloadable\s+file)\b"
+FOLLOWUP_FILLERS = r"\b(excel|xlsx|sheet|spreadsheet|export|download|report|generate|get|make|create|file|previous)\b"
 
 
 def wants_excel(prompt: str) -> bool:
@@ -218,9 +219,13 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
             with st.chat_message("assistant"):
                 with st.spinner("Generating full Excel report from previous query..."):
                     try:
+                        prev_question = next(
+                            (m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"),
+                            user_input,
+                        )
                         exp_res = requests.post(
                             f"{MIDDLEWARE_BASE_URL}/api/v1/export_excel",
-                            json={"sql": last_sql},
+                            json={"sql": last_sql, "question": prev_question},
                             timeout=120,
                         )
                         if exp_res.status_code == 200:
@@ -347,7 +352,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                             try:
                                 exp_res = requests.post(
                                     f"{MIDDLEWARE_BASE_URL}/api/v1/export_excel",
-                                    json={"sql": captured_sql},
+                                    json={"sql": captured_sql, "question": user_input},
                                     timeout=120,
                                 )
                                 if exp_res.status_code == 200:

@@ -40,16 +40,25 @@ def _clean_sap_value(val):
     return val
 
 
-def _validate_and_prepare_sql(sql_query: str) -> str:
-    """Ensures read-only SELECT and strips default LIMIT 100 so Excel gets full data."""
+class ExportExcelRequest(BaseModel):
+    sql: str
+    filename: str | None = None
+    question: str | None = None  # Add this
+
+
+def _validate_and_prepare_sql(sql_query: str, question: str | None = None) -> str:
     clean_sql = sql_query.replace("```sql", "").replace("```", "").strip().rstrip(";")
     upper_sql = clean_sql.upper()
 
     if not upper_sql.startswith("SELECT") or any(k in upper_sql for k in FORBIDDEN_KEYWORDS):
         raise HTTPException(status_code=400, detail="Security Alert: Only SELECT queries are permitted.")
+    #return re.sub(r"\s+LIMIT\s+100\b", "", clean_sql, flags=re.IGNORECASE) default value for strip
+    # Only strip LIMIT 100 if the user didn't explicitly ask for 100
+    user_asked_100 = bool(question and re.search(r"\b100\b", question))
+    if not user_asked_100:
+        clean_sql = re.sub(r"\s+LIMIT\s+100\b", "", clean_sql, flags=re.IGNORECASE)
 
-    # Remove only the default LIMIT 100; preserve explicit user limits like LIMIT 10 or LIMIT 20
-    return re.sub(r"\s+LIMIT\s+100\b", "", clean_sql, flags=re.IGNORECASE)
+    return clean_sql
 
 
 def _fetch_full_hana_rows(sql_query: str) -> list[dict]:
@@ -113,7 +122,7 @@ def _style_worksheet(ws, df: pd.DataFrame):
     ws.auto_filter.ref = ws.dimensions
 
 
-def build_excel_bytes(sql_block: str) -> io.BytesIO:
+def build_excel_bytes(sql_block: str, question: str | None = None) -> io.BytesIO:
     """Splits one or more SQL queries, runs each on SAP HANA, and writes each to its own Excel tab."""
     raw_queries = [
         q.strip()
@@ -130,7 +139,7 @@ def build_excel_bytes(sql_block: str) -> io.BytesIO:
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for idx, raw_q in enumerate(raw_queries, start=1):
-            export_sql = _validate_and_prepare_sql(raw_q)
+            export_sql = _validate_and_prepare_sql(raw_q, question)
 
             print(f"\n--- [Query {idx}/{len(raw_queries)}] SQL Sent to SAP HANA ---")
             print(export_sql)
@@ -165,7 +174,7 @@ def build_excel_bytes(sql_block: str) -> io.BytesIO:
 def export_excel(request: ExportExcelRequest):
     """Zero-token endpoint: executes SQL directly against SAP HANA and streams an .xlsx file."""
     try:
-        excel_buffer = build_excel_bytes(request.sql)
+        excel_buffer = build_excel_bytes(request.sql, request.question)
         filename = request.filename or f"SAP_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
 
         return StreamingResponse(

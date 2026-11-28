@@ -54,7 +54,25 @@ COMPANY_API_URL = os.getenv("COMPANY_API_URL")
 COMPANY_API_KEY = os.getenv("COMPANY_API_KEY")
 HANA_SCHEMA = os.getenv("HANA_SCHEMA_NAME")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+import sys
+import logging
+from pathlib import Path
+ 
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
+ 
+# Folder next to your script (e.g., my_bot/logs/)
+LOG_DIR = Path(__file__).resolve().parent / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+ 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_DIR / "bot.log", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
 logger = logging.getLogger(__name__)
 
 hana_session = requests.Session()
@@ -383,7 +401,8 @@ RESPONSE STYLE:
 
 Answer the user's question directly in simple, clear sentences. Adapt the opening greeting (with 1 relevant emoji) and layout to match what the user asked:
 
-1. FOR EXCEL / REPORT EXPORTS (when the user asks for Excel, sheet, export, or downloadable file):
+1. FOR EXCEL / REPORT EXPORTS (STRICT — ONLY when the user asks for Excel, sheet, generate. export, or downloadable file):
+- If Excel is not requested, use Rule 3: show the top 10 rows, state the total count.
 - Still run the SQL query first so the system can generate the Excel file.
 - Do NOT write a long summary or show a Markdown table.
 - Start with a friendly greeting + emoji and reply in 1–2 simple sentences with the record count or total (if available), telling the user they can view and download the Excel file by clicking the button below (e.g., "📥 Sure, here are the customer details for October 2026. Your Excel file is ready—click the download button below to view it.").
