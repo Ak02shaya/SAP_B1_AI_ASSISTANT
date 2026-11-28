@@ -16,19 +16,17 @@ from chart_generator import build_visual_from_summary
 from entity_cache import smart_spell_check, refresh_ram_dictionary
 from sqlite_cache import init_db, get_cached_sql, save_cached_sql
 from conversation_cache import (
-    init_conversation_db,
-    save_turn,
     get_conversation_history,
     build_context_messages,
-    get_last_sql,
-    clear_session,
+    insert_conversation_turn,
 )
 from excel_exporter import router as excel_router
 from auth import router as auth_router
+from config import LIVE_QUERY_URL, DB_API_KEY
 
 
 init_db()
-init_conversation_db()
+#init_conversation_db()
 
 load_dotenv()
 
@@ -50,8 +48,8 @@ def llm_options(effort: str) -> dict:
         return {}
     return {"extra_body": {"thinking": {"type": "between_tools"}, "output_config": {"effort": effort}}}
 
-COMPANY_API_URL = os.getenv("COMPANY_API_URL")
-COMPANY_API_KEY = os.getenv("COMPANY_API_KEY")
+#COMPANY_API_URL = os.getenv("DB_URL")
+#COMPANY_API_KEY = os.getenv("COMPANY_API_KEY")
 HANA_SCHEMA = os.getenv("HANA_SCHEMA_NAME")
 
 import sys
@@ -89,10 +87,15 @@ def startup_event():
     thread = threading.Thread(target=refresh_ram_dictionary, daemon=True)
     thread.start()
 
+#class AskRequest(BaseModel):
+    #question: str
+    #session_id: str = "default"
 class AskRequest(BaseModel):
     question: str
-    session_id: str = "default"
-
+    u_id: int
+    chat_id: int
+    ques_id: int = 1
+    chat_title: str | None = None
 
 def generate_session_id(question: str) -> str:
     """Generates a simple session hash. The frontend can also send one."""
@@ -111,12 +114,12 @@ def execute_via_company_api(sql_query: str):
 
     try:
         headers = {
-            "QIKCHAT-API-KEY": COMPANY_API_KEY,
-            "Content-Type": "text/plain",
+            "QIKCHAT-API-KEY": DB_API_KEY,
+            "Content-Type": "application/json",
         }
 
         response = hana_session.post(
-            COMPANY_API_URL,
+            LIVE_QUERY_URL,
             headers=headers,
             data=clean_sql.encode("utf-8"),
             timeout=120,
@@ -273,13 +276,9 @@ class ClearConversationRequest(BaseModel):
 
 @app.post("/api/v1/clear_conversation")
 def clear_conversation_history(request: ClearConversationRequest):
-    """Clears conversation cache on sign-out so the next session starts fresh."""
-    try:
-        clear_session(request.session_id)
-        logger.info(f"Conversation history cleared for session: {request.session_id}")
-        return {"status": "success", "message": "Conversation history cleared."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """No-op for HANA persistence: history is preserved per U_ID and CHAT_ID."""
+    logger.info(f"Session ended cleanly: {request.session_id}")
+    return {"status": "success", "message": "Session closed."}
 
 
 @app.post("/api/v1/ask")
@@ -288,7 +287,7 @@ def ask_copilot(request: AskRequest):
         start_time = time.time()
         current_date = datetime.now().strftime("%Y-%m-%d")
         normalized_q = request.question.strip().lower()
-        session_id = request.session_id or "default"
+        #session_id = request.session_id or "default"
 
         total_in_tokens = 0
         total_out_tokens = 0
@@ -450,7 +449,8 @@ FORMATTING RULES (all answers):
             # (Only check static cache if there is NO prior conversation context,
             # so follow-up questions always take conversation history into account!)
             # ==========================================
-            conversation_history = get_conversation_history(session_id)
+            #conversation_history = get_conversation_history(session_id)
+            conversation_history = get_conversation_history(request.u_id, request.chat_id)
             cached_sql = get_cached_sql(normalized_q) if not conversation_history else None
 
             if cached_sql:
@@ -466,7 +466,7 @@ FORMATTING RULES (all answers):
                 db_start_time = time.time()
                 raw_data = execute_via_company_api(cached_sql)
                 cache_db_exec_sec = round(time.time() - db_start_time, 2)
-                cache_preview = make_result_preview(raw_data)
+                #cache_preview = make_result_preview(raw_data)
 
                 cache_prompt = f"""Here is the database JSON: {to_model_json(raw_data)}
                 If it is empty ([]), reply exactly with 'No records found for this criteria.' and stop.
@@ -492,13 +492,17 @@ FORMATTING RULES (all answers):
                         yield json.dumps({"type": "chunk", "text": text}) + "\n"
 
                 # Persist turn to conversation cache
-                save_turn(session_id, "user", request.question)
-                save_turn(
-                    session_id, "assistant", full_cached_resp[:600],
+                saved_title = insert_conversation_turn(
+                    u_id=request.u_id,
+                    chat_id=request.chat_id,
+                    ques_id=request.ques_id,
+                    question=request.question,
                     summary=clean_summary(full_cached_resp),
+                    chat_title=request.chat_title,
                 )
+                yield json.dumps({"type": "chat_title", "title": saved_title}) + "\n"
 
-                visual = build_visual_from_summary(full_final_resp, user_prompt=request.question)
+                visual = build_visual_from_summary(full_cached_resp, user_prompt=request.question)
                 if visual:
                     yield json.dumps({"type": "visual", "visual": visual}) + "\n"
         
@@ -567,7 +571,7 @@ FORMATTING RULES (all answers):
             ]
 
             # Build messages WITH full prior conversation context for continuous conversation flow
-            messages = build_context_messages(session_id, request.question)
+            messages = build_context_messages(request.u_id, request.chat_id, request.question) #remove session id
 
             max_loops = 6
             last_result_preview = None
@@ -682,11 +686,15 @@ FORMATTING RULES (all answers):
                         yield json.dumps({"type": "chunk", "text": response_text}) + "\n"
 
                     # Save turns into conversation cache so future follow-up questions retain context
-                    save_turn(session_id, "user", request.question)
-                    save_turn(
-                        session_id, "assistant", response_text[:600],
+                    saved_title = insert_conversation_turn(
+                        u_id=request.u_id,
+                        chat_id=request.chat_id,
+                        ques_id=request.ques_id,
+                        question=request.question,
                         summary=clean_summary(response_text),
+                        chat_title=request.chat_title,
                     )
+                    yield json.dumps({"type": "chat_title", "title": saved_title}) + "\n"
 
                     visual = build_visual_from_summary(response_text, user_prompt=request.question)
                     if visual:
@@ -713,8 +721,16 @@ FORMATTING RULES (all answers):
                     "type": "chunk",
                     "text": fallback_msg
                 }) + "\n"
-                save_turn(session_id, "user", request.question)
-                save_turn(session_id, "assistant", fallback_msg)
+
+                saved_title = insert_conversation_turn(
+                        u_id=request.u_id,
+                        chat_id=request.chat_id,
+                        ques_id=request.ques_id,
+                        question=request.question,
+                        summary=fallback_msg,
+                        chat_title=request.chat_title,
+                )
+                yield json.dumps({"type": "chat_title", "title": saved_title}) + "\n"
                 execution_time = round(time.time() - start_time, 2)
                 yield json.dumps({
                     "type": "metrics",
@@ -745,11 +761,15 @@ FORMATTING RULES (all answers):
                     yield json.dumps({"type": "chunk", "text": text}) + "\n"
 
             # Save completed analytical turn to conversation cache
-            save_turn(session_id, "user", request.question)
-            save_turn(
-                session_id, "assistant", full_final_resp[:600],
-                summary=clean_summary(full_final_resp),
-            )
+                saved_title = insert_conversation_turn(
+                        u_id=request.u_id,
+                        chat_id=request.chat_id,
+                        ques_id=request.ques_id,
+                        question=request.question,
+                        summary=clean_summary(full_final_resp),
+                        chat_title=request.chat_title,
+                )
+            yield json.dumps({"type": "chat_title", "title": saved_title}) + "\n"
 
             visual = build_visual_from_summary(full_final_resp, user_prompt=request.question)
             if visual:

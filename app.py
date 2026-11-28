@@ -20,6 +20,10 @@ if "login_attempts" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state.username = None
 
+#---COVERSATION_AUTH---
+
+
+
 if not st.session_state.authenticated:
     st.title("🔐 SAP B1 Endpoint Login")
 
@@ -41,11 +45,18 @@ if not st.session_state.authenticated:
                         json={"username": u.strip(), "password": p},
                         timeout=15,
                     )
+                    #conversation
                     if auth_res.status_code == 200:
+                        auth_data = auth_res.json()
                         st.session_state.authenticated = True
-                        st.session_state.username = auth_res.json().get("username", u.strip())
+                        st.session_state.u_id = auth_data.get("U_ID")
+                        st.session_state.username = auth_data.get("username", u.strip())
+                        st.session_state.chat_id = int(datetime.now().timestamp())
+                        st.session_state.ques_id = 1
+                        st.session_state.chat_title = None
                         st.session_state.login_attempts = 0
                         st.rerun()
+
                     elif auth_res.status_code == 401:
                         st.session_state.login_attempts += 1
                         if st.session_state.login_attempts >= 3:
@@ -267,12 +278,18 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
 
         with st.spinner("Analyzing intent and generating SQL..."):
             try:
-                res = requests.post(
-                    f"{MIDDLEWARE_BASE_URL}/api/v1/ask",
-                    json={"question": user_input},
-                    stream=True,
-                    timeout=120,
-                )
+                res = requests.post(   #conversation
+                f"{MIDDLEWARE_BASE_URL}/api/v1/ask",
+                json={
+                    "question": user_input,
+                    "u_id": st.session_state.u_id,
+                    "chat_id": st.session_state.chat_id,
+                    "ques_id": st.session_state.ques_id,
+                    "chat_title": st.session_state.chat_title,
+                },
+                stream=True,
+                timeout=120,
+            )
                 res.raise_for_status()
 
                 for line in res.iter_lines(chunk_size=1):

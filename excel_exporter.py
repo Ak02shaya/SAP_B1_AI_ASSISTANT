@@ -11,13 +11,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+from config import LIVE_QUERY_URL
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-COMPANY_API_URL = os.getenv("COMPANY_API_URL")
+#COMPANY_API_URL = os.getenv("COMPANY_API_URL")
 COMPANY_API_KEY = os.getenv("COMPANY_API_KEY", "YOUR_API_KEY")
 
 hana_export_session = requests.Session()
@@ -68,7 +69,7 @@ def _fetch_full_hana_rows(sql_query: str) -> list[dict]:
         "Content-Type": "text/plain",
     }
     response = hana_export_session.post(
-        COMPANY_API_URL,
+        LIVE_QUERY_URL,
         headers=headers,
         data=sql_query.encode("utf-8"),
         timeout=120,

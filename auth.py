@@ -4,15 +4,15 @@ import requests
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from config import USER_AUTH_URL, DB_API_KEY
 
 load_dotenv()
 
 router = APIRouter()
 
-COMPANY_API_URL = os.getenv("COMPANY_API_URL")
-COMPANY_API_KEY = os.getenv("COMPANY_API_KEY")
-HANA_SCHEMA = os.getenv("HANA_SCHEMA_NAME")
-USER_TABLE = os.getenv("HANA_USER_TABLE")  
+
+USER_DB = os.getenv("HANA_USER_SCHEMA") #GETTING USER_DB
+USER_TABLE = os.getenv("HANA_USER_TABLE")  #GETTING USER_TABLE
 
 hana_auth_session = requests.Session()
 
@@ -22,25 +22,24 @@ class LoginRequest(BaseModel):
     password: str
 
 
-def authenticate_user(username: str, password: str) -> bool:
-    """Verifies U_NAME and U_PASSWORD against SAP HANA."""
-    # Escape single quotes to prevent SQL injection
+def authenticate_user(username: str, password: str) -> int | str | None:
+    """Verifies U_NAME and U_PASSWORD against SAP HANA and returns U_ID if valid."""
     safe_user = username.strip().replace("'", "''")
 
     sql = f'''
-        SELECT "U_NAME", "U_PASSWORD"
-        FROM "{HANA_SCHEMA}"."{USER_TABLE}"
+        SELECT "U_ID", "U_NAME", "U_PASSWORD"
+        FROM "{USER_DB}"."{USER_TABLE}"
         WHERE "U_NAME" = '{safe_user}'
         LIMIT 1
     '''
 
     headers = {
-        "QIKCHAT-API-KEY": COMPANY_API_KEY,
-        "Content-Type": "text/plain",
+        "QIKCHAT-API-KEY": DB_API_KEY,
+        "Content-Type": "application/json",
     }
 
-    response = hana_auth_session.post(
-        COMPANY_API_URL,
+    response = hana_auth_session.get(
+        USER_AUTH_URL,
         headers=headers,
         data=sql.encode("utf-8"),
         timeout=30,
@@ -50,10 +49,12 @@ def authenticate_user(username: str, password: str) -> bool:
 
     rows = data if isinstance(data, list) else data.get("value", data.get("results", []))
     if not rows or not isinstance(rows, list):
-        return False
+        return None
 
     stored_password = str(rows[0].get("U_PASSWORD") or "")
-    return hmac.compare_digest(stored_password, password)
+    if hmac.compare_digest(stored_password, password):
+        return rows[0].get("U_ID")
+    return None
 
 
 @router.post("/api/v1/login")
@@ -62,8 +63,13 @@ def login(request: LoginRequest):
         raise HTTPException(status_code=400, detail="Username and password are required.")
 
     try:
-        if authenticate_user(request.username, request.password):
-            return {"status": "success", "username": request.username.strip()}
+        u_id = authenticate_user(request.username, request.password)
+        if u_id is not None:
+            return {
+                "status": "success",
+                "U_ID": u_id,
+                "username": request.username.strip(),
+            }
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Database connection error: {str(e)}")
 

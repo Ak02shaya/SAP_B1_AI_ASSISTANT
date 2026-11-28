@@ -5,7 +5,7 @@ import threading
 import difflib
 import logging
 import re  # Required for dynamic text normalization
-
+from config import LIVE_QUERY_URL
 logger = logging.getLogger(__name__)
 
 # Cache configuration
@@ -27,7 +27,8 @@ ram_dictionary = {
 }
 def fetch_data_from_hana(query: str):
     """Helper to run a raw query and return a list of strings."""
-    url = os.getenv("COMPANY_API_URL")
+    #url = os.getenv("DB_URL")
+
 
     headers = {
         "QIKCHAT-API-KEY": "COMPANY_API_KEY",
@@ -35,7 +36,7 @@ def fetch_data_from_hana(query: str):
     }
     try:
         response = requests.post(
-            url,
+            LIVE_QUERY_URL,
             headers=headers,
             data=query.encode("utf-8"),
             timeout=120

@@ -1,134 +1,129 @@
-"""
-Conversation Cache for SAP B1 AI Assistant
--------------------------------------------
-Stores per-session conversation history (session_id, role, content, summary, created_at).
-All turns are kept until the user signs out, which triggers clear_session().
-"""
+import os
+import re
+import requests
+from datetime import datetime
+from dotenv import load_dotenv
+from config import CONV_SELECT_URL, CONV_INSERT_URL, DB_API_KEY
 
-import sqlite3
-import time
-import logging
+try:
+    import yake
+    _KW_EXTRACTOR = yake.KeywordExtractor(lan="en", n=3, dedupLim=0.7, top=2)
+except ImportError:
+    _KW_EXTRACTOR = None
 
-logger = logging.getLogger(__name__)
+load_dotenv()
 
-DB_PATH = "copilot_cache.db"
+HANA_USER_SCHEMA = os.getenv("HANA_USER_SCHEMA")
+CONV_TABLE = os.getenv("HANA_USER_CONVERSATION")
+DEFAULT_CONTEXT_N = int(os.getenv("CONVERSATION_CONTEXT_N", "10"))
 
-RECENT_TURNS_WITH_DETAIL = 3
-RECENT_SUMMARY_MAX_CHARS = 900
-OLD_SUMMARY_MAX_CHARS = 300
-
-
-def _ensure_column(cursor, table: str, column: str, ddl: str):
-    """Adds a column to an existing table if it is missing."""
-    cursor.execute(f"PRAGMA table_info({table})")
-    existing = [row[1] for row in cursor.fetchall()]
-    if column not in existing:
-        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-        logger.info(f"Added column {column} to {table}")
+HEADERS = {
+    "Content-Type": "application/json",
+    "QIKCHAT-API-KEY": "DB_API_KEY" ,
+}
 
 
-def init_conversation_db():
-    """Creates the simplified conversation history table."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Conversation_History (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            summary TEXT DEFAULT NULL,
-            created_at REAL NOT NULL
-        )
-    """)
-    _ensure_column(cursor, "Conversation_History", "summary", "TEXT DEFAULT NULL")
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_session_id
-        ON Conversation_History(session_id)
-    """)
-    conn.commit()
-    conn.close()
+_FILLER_PREFIXES = (
+    r"^(please\s+)?(can\s+you\s+|could\s+you\s+|would\s+you\s+)?"
+    r"(give\s+me|give|show\s+me|show|get\s+me|get|tell\s+me|tell|"
+    r"find\s+me|find|list|fetch|display|what\s+is|what\s+are|what|"
+    r"how\s+much\s+is|how\s+many|how)\s+(the\s+|a\s+|an\s+|all\s+)?"
+)
 
 
-def save_turn(
-    session_id: str,
-    role: str,
-    content: str,
-    summary: str = None,
-    **_ignored,
-):
-    """Saves a single conversation turn. Extra kwargs (like sql_query) are safely ignored."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO Conversation_History
-            (session_id, role, content, summary, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    """, (session_id, role, content, summary, time.time()))
-    conn.commit()
-    conn.close()
+def extract_chat_title(question: str, max_words: int = 5) -> str:
+    """Generates a short CHAT_TITLE from the first question."""
+    text = re.sub(r"[^\w\s₹\-/]", " ", (question or "").strip())
+    core = re.sub(_FILLER_PREFIXES, "", re.sub(r"\s+", " ", text), flags=re.IGNORECASE).strip() or text
+
+    if _KW_EXTRACTOR is not None:
+        keywords = _KW_EXTRACTOR.extract_keywords(core)
+        if keywords:
+            return keywords[0][0].strip().title()
+
+    return " ".join(core.split()[:max_words]).title() or "New Chat"
 
 
-def get_conversation_history(session_id: str) -> list[dict]:
-    """Returns the conversation history for a session, oldest first."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT role, content, summary, created_at
-        FROM Conversation_History
-        WHERE session_id = ?
-        ORDER BY created_at ASC, id ASC
-    """, (session_id,))
-    rows = cursor.fetchall()
-    conn.close()
+def get_conversation_history(u_id: int, chat_id: int, n: int | None = None) -> list[dict]:
+    """
+    Fetches the last N pairs (N * 2 rows) strictly for this U_ID and CHAT_ID.
+    User 1 (U_ID=1) can never read User 2's (U_ID=2) rows.
+    """
+    row_limit = (n if n is not None else DEFAULT_CONTEXT_N) * 2
+    payload = {
+        "table": f"{HANA_USER_SCHEMA}.{CONV_TABLE}",
+        "U_ID": u_id,
+        "CHAT_ID": chat_id,
+        "limit": row_limit,
+    }
+    resp = requests.get(CONV_SELECT_URL, json=payload, headers=HEADERS, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
 
-    return [
-        {
-            "role": r[0],
-            "content": r[1],
-            "summary": r[2],
-            "created_at": r[3],
-        }
-        for r in rows
-    ]
+    rows = data if isinstance(data, list) else data.get("data", data.get("results", []))
+    # Sort oldest -> newest so Claude reads the conversation in order
+    rows.sort(key=lambda r: (r.get("QUES_ID", 0), 0 if str(r.get("ROLE", "")).lower() == "user" else 1))
+    return rows[-row_limit:] if row_limit > 0 else []
 
 
-def get_last_sql(session_id: str) -> str | None:
-    """Kept as a no-op stub so existing imports in middleware.py do not break."""
-    return None
-
-
-def clear_session(session_id: str):
-    """Clears all conversation history for a session."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM Conversation_History WHERE session_id = ?", (session_id,))
-    conn.commit()
-    conn.close()
-    logger.info(f"Cleared conversation history for session: {session_id}")
-
-
-def _clip(text: str | None, limit: int) -> str:
-    text = (text or "").strip()
-    return text if len(text) <= limit else text[:limit].rstrip() + "..."
-
-
-def build_context_messages(session_id: str, current_question: str) -> list[dict]:
-    """Builds the messages array for Claude using only the stored summaries."""
-    history = get_conversation_history(session_id)
-
-    assistant_positions = [i for i, t in enumerate(history) if t["role"] == "assistant"]
-    recent_positions = set(assistant_positions[-RECENT_TURNS_WITH_DETAIL:])
-
+def build_context_messages(u_id: int, chat_id: int, current_question: str, n: int | None = None) -> list[dict]:
+    """Converts fetched HANA rows into Claude's messages list."""
+    rows = get_conversation_history(u_id=u_id, chat_id=chat_id, n=n)
     messages = []
-    for i, turn in enumerate(history):
-        if turn["role"] != "assistant":
-            messages.append({"role": "user", "content": turn["content"]})
-            continue
 
-        answer = turn.get("summary") or turn["content"]
-        limit = RECENT_SUMMARY_MAX_CHARS if i in recent_positions else OLD_SUMMARY_MAX_CHARS
-        messages.append({"role": "assistant", "content": "Answer given:\n" + _clip(answer, limit)})
+    for row in rows:
+        role = str(row.get("ROLE") or "user").lower()
+        context = row.get("CONTEXT") or ""
+        messages.append({"role": role, "content": context})
 
     messages.append({"role": "user", "content": current_question})
     return messages
+
+
+def insert_conversation_turn(
+    u_id: int,
+    chat_id: int,
+    ques_id: int,
+    question: str,
+    summary: str,
+    chat_title: str | None = None,
+) -> str:
+    """
+    Inserts 2 rows (user + assistant) under this U_ID and CHAT_ID.
+    Returns the CHAT_TITLE so the session can reuse it for subsequent questions.
+    """
+    title = chat_title if (chat_title and ques_id > 1) else extract_chat_title(question)
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = [
+        {
+            "table": f"{HANA_USER_SCHEMA}.{CONV_TABLE}",
+            "U_ID": u_id,
+            "CHAT_ID": chat_id,
+            "CHAT_TITLE": title,
+            "QUES_ID": ques_id,
+            "ROLE": "user",
+            "CONTEXT": question,
+            "CREATED_AT": created_at,
+        },
+        {
+            "table": f"{HANA_USER_SCHEMA}.{CONV_TABLE}",
+            "U_ID": u_id,
+            "CHAT_ID": chat_id,
+            "CHAT_TITLE": title,
+            "QUES_ID": ques_id,
+            "ROLE": "assistant",
+            "CONTEXT": summary,
+            "CREATED_AT": created_at,
+        },
+    ]
+
+    for payload in rows:
+        resp = requests.post(CONV_INSERT_URL, params=payload, headers=HEADERS, timeout=15)
+
+        if resp.status_code != 200:
+             print("GetLastDetails 400 Body:", resp.text, flush=True)
+
+        resp.raise_for_status()
+
+    return title
